@@ -5,10 +5,13 @@ metadata:
 spec:
   storageClassName: nfs-client
   capacity:
-    storage: 20Gi 
+    storage: 40Gi
   accessModes:
   - ReadWriteOnce
   nfs: 
     path: /srv/nfs/raid6/k8sPVs
     server: 192.168.0.212
-  persistentVolumeReclaimPolicy: Retain 
+  persistentVolumeReclaimPolicy: Retain
+
+
+
