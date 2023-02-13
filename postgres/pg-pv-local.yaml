@@ -1,26 +1,35 @@
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: pg-pv-local
-  labels:
-    type: local
+  name: postgres-pv
 spec:
-  storageClassName: manual
   capacity:
-    storage: 10Gi
+    storage: 20Gi
+  volumeMode: Filesystem
   accessModes:
     - ReadWriteOnce
-  hostPath:
-    path: "/k8s/pvs/csearch/"
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage
+  local:
+    path: /storage
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: storage
+              operator: In
+              values:
+                - worker1
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: postgres-pv-claim
+  name: postgrespvc
 spec:
-  storageClassName: manual
+  storageClassName: local-storage # Empty string must be explicitly set otherwise default StorageClass will be set
+  volumeName: postgres-pv
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 10Gi
+      storage: 20Gi
