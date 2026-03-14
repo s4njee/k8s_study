@@ -1,4 +1,26 @@
-.idea
-.DS_STORE
+.DS_Store
+.idea/
+.vscode/
+.claude/
+
+# Local environment files
+.env
+.env.*
+*.local
+
+# Kubernetes and generated artifacts
+*.kubeconfig
+*.bak
+*.tmp
+*.swp
+*.swo
+
+# Secrets and local registry auth
 docker-registry.helm/htpasswd
 docker-registry.helm/registry-creds
+*.pem
+*.key
+*.crt
+
+# OS files
+Thumbs.db

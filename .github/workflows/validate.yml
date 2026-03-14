@@ -1,0 +1,65 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  markdown:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DavidAnson/markdownlint-cli2-action@v20
+        with:
+          globs: |
+            README.md
+            CONCEPTS.md
+            CONTRIBUTING.md
+            OPERATIONS.md
+            SECRETS.md
+            SECURITY.md
+            TROUBLESHOOTING.md
+            WORKLOADS.md
+            docs/**/*.md
+            AGENTS.md
+            kaniko/README.md
+            kube-prometheus-stack/README.md
+            opensearch/README.md
+
+  yaml:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ibiqlik/action-yamllint@v3
+        with:
+          file_or_dir: >-
+            certbox
+            kaniko
+            kube-prometheus-stack
+            opensearch
+            postgres
+            PV
+            rutorrent
+            secrets
+            security
+            workloads
+            .github/workflows
+          config_data: |
+            extends: default
+            rules:
+              document-start: disable
+              line-length:
+                max: 160
+                level: warning
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+
+      - name: Lint local Docker registry chart
+        run: helm lint docker-registry.helm

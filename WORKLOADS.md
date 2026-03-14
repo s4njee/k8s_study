@@ -14,6 +14,8 @@ The `workloads/` folder contains teaching examples for the main workload pattern
 - `Job` for one-time tasks
 - `CronJob` for scheduled tasks
 - `PodDisruptionBudget` for voluntary disruption protection
+- `InitContainer` for ordered setup tasks that run before the main containers start
+- `HorizontalPodAutoscaler` for automatic scaling based on CPU, memory, or custom metrics
 
 These examples are intentionally small and are meant to show controller shape and defaults, not to be production-ready applications.
 
@@ -47,6 +49,8 @@ Good defaults to follow — you don't need all of these on day one, but they're 
 - Set `concurrencyPolicy`, history limits, an explicit `.spec.timeZone`, and resource requests for `CronJob`.
 - Add a `PodDisruptionBudget` for multi-replica applications that must stay available during drains or upgrades.
 - In shared namespaces, consider `LimitRange` and `ResourceQuota` so one manifest mistake does not starve everything else.
+- Use init containers for ordered startup dependencies (waiting for a database, seeding config files) rather than embedding retry loops in the main container.
+- Add an `HPA` when a Deployment should scale under load. Remove it before manually setting replicas to avoid a fight between you and the autoscaler.
 
 ## Files in `workloads/`
 
@@ -59,6 +63,8 @@ Good defaults to follow — you don't need all of these on day one, but they're 
 | `workloads/04-job.yaml` | Example one-time batch task |
 | `workloads/05-cronjob.yaml` | Example scheduled batch task with explicit time zone and concurrency policy |
 | `workloads/06-pdb.yaml` | Example `PodDisruptionBudget` protecting the web deployment |
+| *(inline example)* | `InitContainer` — ordered setup tasks that run before the main containers start |
+| *(inline example)* | `HorizontalPodAutoscaler` — automatic scaling based on CPU or memory |
 
 ## Recommended apply flow
 
@@ -173,6 +179,93 @@ What this example demonstrates:
 
 This does not protect against involuntary disruptions such as node crashes. It only influences voluntary evictions that use the Eviction API.
 
+### 7. Init containers
+
+Init containers run to completion before any of the main containers start. The Pod stays in `Init:0/N` status until each init container exits successfully. If an init container fails, Kubernetes restarts the Pod according to `restartPolicy`.
+
+Use init containers for:
+
+- waiting for a dependency to be ready (a database, another service) before starting the app
+- seeding a shared volume with config files, certificates, or data the main container needs
+- running schema migrations before the application pod starts accepting traffic
+
+Init containers share the same Pod network and volumes as the main containers. An `emptyDir` volume is the standard way to pass files between an init container and the main container.
+
+Example shape:
+
+```yaml
+spec:
+  volumes:
+    - name: shared-data
+      emptyDir: {}
+  initContainers:
+    - name: seed-config
+      image: busybox:1.36
+      command: ['sh', '-c', 'echo "ready" > /shared/status']
+      volumeMounts:
+        - name: shared-data
+          mountPath: /shared
+  containers:
+    - name: app
+      image: my-app:1.0.0
+      volumeMounts:
+        - name: shared-data
+          mountPath: /config
+```
+
+Multiple init containers run sequentially in the order they are listed, not in parallel.
+
+### 8. HorizontalPodAutoscaler (HPA)
+
+An `HPA` watches a Deployment (or StatefulSet, or any scale-able workload) and adjusts the replica count automatically based on resource utilization or custom metrics.
+
+Use HPA when:
+
+- traffic to a Deployment varies significantly over time
+- you want replicas to scale up under load and back down when idle to reclaim cluster resources
+
+The default HPA algorithm compares current utilization against a target and adjusts replicas up or down to close the gap. The controller checks every 15 seconds by default.
+
+Example that targets 60% CPU utilization with between 2 and 10 replicas:
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: web-demo-hpa
+  namespace: workloads-demo
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: web-demo
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+```
+
+Requirements and notes:
+
+- The target Deployment must have CPU requests set, or the HPA cannot compute utilization.
+- The Metrics Server must be installed in the cluster. K3s ships with it enabled by default.
+- Do not manually set `replicas` on a Deployment that has an active HPA — the two will fight. Either remove the `replicas` field from the Deployment spec or delete the HPA before scaling manually.
+- For memory-based or custom metric scaling, use `autoscaling/v2` and add additional entries under `.spec.metrics`.
+
+Useful commands:
+
+```bash
+kubectl get hpa -n workloads-demo
+kubectl describe hpa web-demo-hpa -n workloads-demo
+```
+
+The `TARGETS` column in `kubectl get hpa` shows `<current>/<target>`. If it shows `<unknown>/60%`, the Metrics Server is not reachable or the Deployment is missing CPU requests.
+
 ## Rollout commands to know
 
 These are worth memorizing:
@@ -197,3 +290,6 @@ If a workload is not behaving, use [TROUBLESHOOTING.md](TROUBLESHOOTING.md) alon
 - [Job](https://kubernetes.io/docs/concepts/workloads/controllers/job/)
 - [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/)
 - [Pod disruptions and PodDisruptionBudget](https://kubernetes.io/docs/concepts/workloads/pods/disruptions/)
+- [Init containers](https://kubernetes.io/docs/concepts/workloads/pods/init-containers/)
+- [HorizontalPodAutoscaler](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/)
+- [Metrics Server](https://github.com/kubernetes-sigs/metrics-server)
