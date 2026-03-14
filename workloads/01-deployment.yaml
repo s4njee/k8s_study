@@ -3,6 +3,9 @@ kind: Deployment
 metadata:
   name: web-demo
   namespace: workloads-demo
+  labels:
+    app.kubernetes.io/name: web-demo
+    app.kubernetes.io/part-of: workloads-demo
 spec:
   replicas: 3
   revisionHistoryLimit: 2
@@ -18,8 +21,18 @@ spec:
     metadata:
       labels:
         app: web-demo
+        app.kubernetes.io/name: web-demo
+        app.kubernetes.io/part-of: workloads-demo
     spec:
       automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: web-demo
       containers:
         - name: web
           image: registry.k8s.io/echoserver:1.10
@@ -51,6 +64,9 @@ kind: Service
 metadata:
   name: web-demo
   namespace: workloads-demo
+  labels:
+    app.kubernetes.io/name: web-demo
+    app.kubernetes.io/part-of: workloads-demo
 spec:
   selector:
     app: web-demo

@@ -20,3 +20,10 @@ spec:
             - |
               echo "running one-off maintenance";
               date -u +"%Y-%m-%dT%H:%M:%SZ";
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi

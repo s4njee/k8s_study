@@ -3,6 +3,9 @@ kind: Service
 metadata:
   name: stateful-demo
   namespace: workloads-demo
+  labels:
+    app.kubernetes.io/name: stateful-demo
+    app.kubernetes.io/part-of: workloads-demo
 spec:
   clusterIP: None
   selector:
@@ -17,6 +20,9 @@ kind: StatefulSet
 metadata:
   name: stateful-demo
   namespace: workloads-demo
+  labels:
+    app.kubernetes.io/name: stateful-demo
+    app.kubernetes.io/part-of: workloads-demo
 spec:
   serviceName: stateful-demo
   replicas: 2
@@ -27,8 +33,11 @@ spec:
     metadata:
       labels:
         app: stateful-demo
+        app.kubernetes.io/name: stateful-demo
+        app.kubernetes.io/part-of: workloads-demo
     spec:
       automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
       containers:
         - name: app
           image: registry.k8s.io/echoserver:1.10

@@ -31,18 +31,22 @@ If you are unsure, start with a `Deployment`. Move to `StatefulSet` only when st
 
 ## Workload best practices
 
-Use these defaults unless you have a strong reason not to:
+Good defaults to follow — you don't need all of these on day one, but they're worth building toward:
 
 - Pin the image tag or digest on every workload.
 - Set CPU and memory requests before you tune limits.
 - Add readiness, liveness, and startup probes where the application supports them.
 - Disable service-account token mounting for workloads that do not call the Kubernetes API.
+- Add standard `app.kubernetes.io/*` labels so related resources stay easy to query, group, and reason about.
+- Set `terminationGracePeriodSeconds` intentionally so updates and evictions do not turn into abrupt kills.
+- For multi-replica apps, use `topologySpreadConstraints` or pod anti-affinity so replicas do not all land on the same node.
 - Prefer `Deployment` plus `Service` for stateless HTTP apps.
 - Pair `StatefulSet` with a headless `Service`, and use `volumeClaimTemplates` when each replica needs its own PVC.
 - Be intentional with `DaemonSet` tolerations so you know whether it should run on control-plane nodes.
-- Set `backoffLimit`, cleanup behavior, and idempotent commands for `Job`.
-- Set `concurrencyPolicy`, history limits, and an explicit `.spec.timeZone` for `CronJob`.
+- Set `backoffLimit`, cleanup behavior, idempotent commands, and resource requests for `Job`.
+- Set `concurrencyPolicy`, history limits, an explicit `.spec.timeZone`, and resource requests for `CronJob`.
 - Add a `PodDisruptionBudget` for multi-replica applications that must stay available during drains or upgrades.
+- In shared namespaces, consider `LimitRange` and `ResourceQuota` so one manifest mistake does not starve everything else.
 
 ## Files in `workloads/`
 

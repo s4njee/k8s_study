@@ -13,13 +13,15 @@ This repo is a hands-on study guide. You will learn Kubernetes by building a sma
 ## Table of contents
 
 - [Introduction](#introduction)
-- [Best practices](#best-practices)
+- [Quickstart](#quickstart)
+- [First-cluster defaults](#first-cluster-defaults)
+- [Install k3s](#install-k3s)
+- [Install Headlamp](#install-headlamp)
+- [Next steps after the basics work](#next-steps-after-the-basics-work)
 - [Secrets guide](SECRETS.md)
 - [Workloads guide](WORKLOADS.md)
 - [Security guide](SECURITY.md)
 - [Troubleshooting guide](TROUBLESHOOTING.md)
-- [Install k3s](#install-k3s)
-- [Install Headlamp](#install-headlamp)
 - [Install the NFS CSI driver](#install-the-nfs-csi-driver)
 - [Install Actions Runner Controller](#install-actions-runner-controller)
 - [Install kube-prometheus-stack](#install-kube-prometheus-stack)
@@ -39,20 +41,42 @@ This repo is a hands-on study guide. You will learn Kubernetes by building a sma
 
 ---
 
-## Best practices
+## Quickstart
 
-Use these defaults throughout the guide unless a section explicitly says otherwise:
+If you're new to Kubernetes, don't try to absorb this whole repo in one sitting.
 
-- **Pin versions** for anything you want to be repeatable: K3s, Helm charts, container images, and manifest URLs. When you document a pinned version, note what was verified and the date.
-- **Use override files instead of editing base manifests.** Kustomize overlays and Helm values files let you customize a deployment without changing the original checked-in files.
-- **Give each application its own namespace.** Namespaces are like folders that keep resources organized. Reserve `kube-system` for cluster-level services like Traefik and CSI drivers.
-- **Keep secrets out of git.** Passwords, API keys, and tokens should not be committed to version control. Use Kubernetes Secrets created on the command line, `--set-file` for Helm, `.secrets` files excluded via `.gitignore`, or encryption tools like SOPS or Sealed Secrets.
-- **Expose HTTP apps through ingress, not LoadBalancer.** Use a `ClusterIP` service (only reachable inside the cluster) paired with an ingress rule (which tells Traefik to route outside traffic to your app). Only use `LoadBalancer` when you need direct non-HTTP network exposure.
-- **Set resource baselines for every workload.** Before relying on a deployment, give it a pinned image version, CPU and memory requests/limits, health probes (so Kubernetes knows when the app is ready), and a security context that avoids running as root.
-- **Preview before you apply.** Commands like `kubectl diff` and `kubectl apply --dry-run=server` show what would change without actually changing it. `helm upgrade --install --wait --atomic` rolls back automatically if something goes wrong.
-- **Plan for recovery, not just installation.** For databases and other stateful services, write down how you would back up and restore your data. A working storage volume is not the same thing as a recovery plan.
+The shortest path to something useful:
 
-If you want focused side guides for day-to-day Kubernetes work, see [`SECRETS.md`](SECRETS.md), [`WORKLOADS.md`](WORKLOADS.md), [`SECURITY.md`](SECURITY.md), and [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
+1. install K3s
+2. copy your kubeconfig locally
+3. run `kubectl get nodes` and confirm it works
+4. deploy a workload from [`workloads/`](workloads)
+5. come back for storage, ingress, security, and add-ons once the basics click
+
+The goal is **a working cluster you understand**, not a perfectly hardened platform.
+
+## First-cluster defaults
+
+Keep the day-one rules small:
+
+- **Pin versions** when you want a repeatable setup — K3s, Helm charts, image tags, downloaded manifests.
+- **Give each app its own namespace** so resources stay organized.
+- **Keep secrets out of git**, even in a lab repo.
+- **Preview before you apply** — `kubectl diff` or `kubectl apply --dry-run=server`.
+
+That's enough to get moving.
+
+Once things feel comfortable, layer in the stronger defaults:
+
+- resource requests and limits
+- health probes (readiness, liveness, startup)
+- standard `app.kubernetes.io/*` labels
+- graceful shutdown via `terminationGracePeriodSeconds`
+- replica spreading with `topologySpreadConstraints` or anti-affinity
+- namespace guardrails like `LimitRange` and `ResourceQuota`
+- backup and recovery planning for stateful apps
+
+For deeper dives once the basics work, see [`SECRETS.md`](SECRETS.md), [`WORKLOADS.md`](WORKLOADS.md), [`SECURITY.md`](SECURITY.md), and [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
 
 ---
 
@@ -138,7 +162,9 @@ chmod 600 ~/.kube/config
 
 ## Install Headlamp
 
-Headlamp is a modern web-based UI for Kubernetes. It lets you browse your cluster's resources, view logs, and manage workloads through a graphical interface instead of the command line. It is a better default choice than the older Kubernetes Dashboard for most homelab use.
+Optional — if you just want a working cluster, skip this for now and come back later.
+
+Headlamp is a web UI for Kubernetes. It lets you browse resources, view logs, and manage workloads through a graphical interface instead of the command line. It's a better default than the older Kubernetes Dashboard for most homelab use.
 
 ### Option 1: Use the desktop app
 
@@ -192,6 +218,21 @@ kubectl create token headlamp-admin -n headlamp
 Paste that token into Headlamp when prompted.
 
 ---
+
+## Next steps after the basics work
+
+Everything below this point is useful, but none of it is required to have a working cluster.
+
+Think of these as follow-on building blocks — pick what you need:
+
+- storage (NFS CSI driver)
+- ingress and TLS (Traefik + cert-manager)
+- monitoring (Prometheus + Grafana)
+- private registries (Docker Registry)
+- CI/CD runners (Actions Runner Controller)
+- stateful apps and homelab add-ons
+
+You don't need all of them before your cluster is "real."
 
 ## Install the NFS CSI driver
 
