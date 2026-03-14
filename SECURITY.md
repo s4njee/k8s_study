@@ -12,6 +12,7 @@ The `security/` folder contains small examples for common security building bloc
 - least-privilege `ServiceAccount` and RBAC
 - a restricted-style Deployment
 - basic `NetworkPolicy` patterns
+- `ResourceQuota` and `LimitRange` for namespace-level resource enforcement
 
 For secret-specific guidance, see [SECRETS.md](SECRETS.md).
 
@@ -44,6 +45,8 @@ Use these defaults unless a workload explicitly needs something broader:
 - Use `NetworkPolicy` to make namespace traffic rules explicit instead of relying on default openness.
 - Protect the cluster datastore and backups. For K3s, enable secrets encryption intentionally and treat snapshots as sensitive data.
 - Enable audit logging if you need traceability. K3s does not enable audit logging by default.
+- Apply a `ResourceQuota` to shared namespaces to prevent one team or workload from exhausting cluster capacity.
+- Use `LimitRange` to set default requests and limits for a namespace so Pods that omit them still have sensible bounds.
 
 ## K3s-specific notes
 
@@ -62,6 +65,7 @@ These are especially relevant for this repo:
 | `security/01-serviceaccount-rbac.yaml` | Demonstrates a least-privilege `ServiceAccount`, `Role`, and `RoleBinding` |
 | `security/02-secure-deployment.yaml` | Demonstrates a hardened Deployment and `Service` with non-root execution and restricted container settings |
 | `security/03-networkpolicy.yaml` | Demonstrates default-deny plus explicit DNS egress and same-namespace ingress rules |
+| `security/04-resource-quota.yaml` | Demonstrates `ResourceQuota` and `LimitRange` for namespace-level resource governance |
 
 ## Recommended apply flow
 
@@ -77,6 +81,7 @@ Then apply the supporting examples:
 kubectl apply -f security/01-serviceaccount-rbac.yaml
 kubectl apply -f security/02-secure-deployment.yaml
 kubectl apply -f security/03-networkpolicy.yaml
+kubectl apply -f security/04-resource-quota.yaml
 ```
 
 > [!IMPORTANT]
@@ -143,6 +148,72 @@ What this example demonstrates:
 
 Without an allow rule, default-deny policies will block more than people expect. DNS is the classic first thing to break.
 
+### 5. ResourceQuota and LimitRange
+
+Manifest: `security/04-resource-quota.yaml`
+
+Use these two objects together to govern resource consumption at the namespace level.
+
+**ResourceQuota** sets hard upper bounds on the total resources a namespace can request across all its Pods, Services, and other objects. When the quota is reached, new objects that would exceed it are rejected.
+
+What a ResourceQuota can cap:
+
+- total CPU requests and limits across all Pods
+- total memory requests and limits across all Pods
+- counts of objects such as Pods, Services, PVCs, Secrets, and ConfigMaps
+
+Example:
+
+```yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: team-quota
+  namespace: my-team
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    pods: "20"
+```
+
+**LimitRange** sets default and maximum values for individual containers in a namespace. If a Pod spec omits resource requests or limits, the LimitRange fills in the defaults automatically. If a Pod spec exceeds the maximum, it is rejected.
+
+Example:
+
+```yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: container-defaults
+  namespace: my-team
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: 500m
+        memory: 256Mi
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      max:
+        cpu: "2"
+        memory: 2Gi
+```
+
+Use LimitRange so that Pods without explicit resource settings still get sensible bounds, which is a prerequisite for HPA to work and for the scheduler to make reasonable placement decisions.
+
+Useful commands:
+
+```bash
+kubectl describe resourcequota -n my-team
+kubectl describe limitrange -n my-team
+```
+
+`kubectl describe resourcequota` shows current usage against each hard limit, which makes it easy to see which resources are close to the cap.
+
 ## Practical checklist
 
 If you are tightening a real namespace, this is a good first pass:
@@ -165,3 +236,5 @@ If you are tightening a real namespace, this is a good first pass:
 - [Linux kernel security constraints and features](https://kubernetes.io/docs/concepts/security/linux-kernel-security-constraints/)
 - [Network Policies](https://kubernetes.io/docs/concepts/services-networking/network-policies/)
 - [K3s hardening guide](https://docs.k3s.io/security/hardening-guide)
+- [ResourceQuota](https://kubernetes.io/docs/concepts/policy/resource-quotas/)
+- [LimitRange](https://kubernetes.io/docs/concepts/policy/limit-range/)

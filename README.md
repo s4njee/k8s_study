@@ -14,6 +14,7 @@ This repo is a hands-on study guide. You will learn Kubernetes by building a sma
 
 - [Introduction](#introduction)
 - [Best practices](#best-practices)
+- [Concepts guide](CONCEPTS.md)
 - [Secrets guide](SECRETS.md)
 - [Workloads guide](WORKLOADS.md)
 - [Security guide](SECURITY.md)
@@ -31,6 +32,8 @@ This repo is a hands-on study guide. You will learn Kubernetes by building a sma
 - [Optional components](#optional-components)
   - [OpenSearch](#opensearch)
   - [Kaniko](#kaniko)
+  - [GitOps with Flux or ArgoCD](#gitops-with-flux-or-argocd)
+- [Cluster operations guide](OPERATIONS.md)
 - [After install](#after-install)
   - [Immich](#immich)
   - [Hoarder](#hoarder)
@@ -52,7 +55,18 @@ Use these defaults throughout the guide unless a section explicitly says otherwi
 - **Preview before you apply.** Commands like `kubectl diff` and `kubectl apply --dry-run=server` show what would change without actually changing it. `helm upgrade --install --wait --atomic` rolls back automatically if something goes wrong.
 - **Plan for recovery, not just installation.** For databases and other stateful services, write down how you would back up and restore your data. A working storage volume is not the same thing as a recovery plan.
 
-If you want focused side guides for day-to-day Kubernetes work, see [`SECRETS.md`](SECRETS.md), [`WORKLOADS.md`](WORKLOADS.md), [`SECURITY.md`](SECURITY.md), and [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
+For focused side guides, see [`CONCEPTS.md`](CONCEPTS.md) (core concepts), [`SECRETS.md`](SECRETS.md), [`WORKLOADS.md`](WORKLOADS.md), [`SECURITY.md`](SECURITY.md), [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md), and [`OPERATIONS.md`](OPERATIONS.md) (upgrades and backups).
+
+---
+
+## Core concepts
+
+If you are new to Kubernetes, read [`CONCEPTS.md`](CONCEPTS.md) before following the installation steps. It covers the foundational ideas that come up throughout this guide — with plain-language explanations and real-world analogies:
+
+- **Services** — why Pod IPs are unreliable and how Services provide a stable address
+- **ConfigMaps** — storing app configuration outside the container image
+- **Node scheduling** — taints, tolerations, and affinity rules for controlling where Pods run
+- **CRDs and Operators** — how tools like cert-manager and OpenSearch extend Kubernetes with new object types
 
 ---
 
@@ -894,6 +908,52 @@ kubectl logs -n kaniko -f job/kaniko-build
 ```
 
 For full details, see `kaniko/README.md`.
+
+### GitOps with Flux or ArgoCD
+
+GitOps is a deployment approach where a controller running inside the cluster continuously reconciles what is deployed against a Git repository. Instead of running `kubectl apply` or `helm upgrade` manually, you push changes to Git and the controller applies them.
+
+The two most widely used GitOps controllers are:
+
+| Tool | Style | When to use it |
+|---|---|---|
+| [Flux](https://fluxcd.io) | Pull-based, Kubernetes-native CRDs | Good for Helm chart management and multi-tenancy; minimal UI |
+| [ArgoCD](https://argo-cd.readthedocs.io) | Pull-based, web UI included | Good when you want a visual diff view and manual sync approval |
+
+Both tools follow the same basic model:
+
+1. Store your Kubernetes manifests or Helm values files in a Git repo.
+2. Install the controller in your cluster.
+3. Create a custom resource (a `GitRepository` + `Kustomization` for Flux, or an `Application` for ArgoCD) pointing at the repo.
+4. The controller polls Git on a schedule, detects drift between the repo and live cluster state, and applies changes automatically.
+
+**Quick Flux install (to get a feel for it):**
+
+```bash
+# Install the Flux CLI
+curl -s https://fluxcd.io/install.sh | sudo bash
+
+# Bootstrap Flux onto the cluster (this commits Flux's own manifests to your repo)
+flux bootstrap github \
+  --owner=<your-github-username> \
+  --repository=<your-repo-name> \
+  --branch=main \
+  --path=clusters/my-cluster \
+  --personal
+```
+
+After bootstrap, any manifest you commit under `clusters/my-cluster/` is automatically applied to the cluster within the configured sync interval (default: 10 minutes).
+
+GitOps is not required for this homelab guide, but it is how most teams manage Kubernetes in production. Understanding it explains why many CI/CD pipelines end with a `git push` rather than a `kubectl apply`.
+
+---
+
+## Cluster operations
+
+See [`OPERATIONS.md`](OPERATIONS.md) for full runbooks on:
+
+- **Upgrading K3s** — manual upgrade order (server first, then agents), draining nodes, and using the System Upgrade Controller for automated rolling upgrades
+- **Backup and restore** — SQLite snapshots for single-server setups, embedded etcd snapshots for HA setups, and application-level backup with Velero
 
 ---
 
