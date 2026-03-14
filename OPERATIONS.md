@@ -129,7 +129,7 @@ sudo systemctl start k3s
 
 ### Embedded etcd snapshots (multi-server setup)
 
-If you installed K3s with `--cluster-init`, K3s uses embedded etcd and takes automated snapshots automatically:
+If you installed K3s with `--cluster-init`, K3s uses embedded etcd and takes snapshots automatically:
 
 - **Frequency:** every 12 hours by default
 - **Retention:** 5 snapshots by default
@@ -177,7 +177,7 @@ K3s datastore backups capture the cluster's raw state. A complementary approach 
 ```bash
 velero install \
   --provider aws \
-  --plugins velero/velero-plugin-for-aws:v1.x.x \
+  --plugins velero/velero-plugin-for-aws:v1.x.x \   # replace with the latest release tag
   --bucket <your-backup-bucket> \
   --backup-location-config region=<region>
 ```
