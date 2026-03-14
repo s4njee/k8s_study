@@ -68,15 +68,21 @@ For focused side guides, see [`CONCEPTS.md`](CONCEPTS.md) (core concepts), [`SEC
 
 If you are new to Kubernetes, read [`CONCEPTS.md`](CONCEPTS.md) before following the installation steps. It covers the foundational ideas that come up throughout this guide — with plain-language explanations and real-world analogies:
 
+- **The declarative model** — writing desired state and letting Kubernetes reconcile it continuously
+- **The control plane** — the API server, etcd, scheduler, and controller manager explained
 - **Namespaces** — partitioning a cluster to keep applications and teams isolated
 - **Labels and selectors** — how Services find Pods and how objects relate to each other
+- **Workload controllers** — Deployment, StatefulSet, DaemonSet, Job, and CronJob
 - **Services** — why Pod IPs are unreliable and how Services provide a stable address
+- **Ingress** — routing external HTTP/HTTPS traffic through a single controller
 - **ConfigMaps** — storing app configuration outside the container image
+- **Secrets** — sensitive configuration and how to keep it out of git
 - **Persistent Volumes** — giving Pods storage that survives restarts
 - **Health probes** — readiness, liveness, and startup probes explained
 - **Resource requests and limits** — CPU and memory budgets for containers
 - **Node scheduling** — taints, tolerations, and affinity rules for controlling where Pods run
 - **CRDs and Operators** — how tools like cert-manager and OpenSearch extend Kubernetes with new object types
+- **RBAC** — the subject/verb/resource model for controlling who can do what
 
 ---
 

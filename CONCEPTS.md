@@ -9,15 +9,21 @@ The guidance below was checked against the official Kubernetes docs on **March 1
 ## Table of contents
 
 - [What is a Pod?](#what-is-a-pod)
+- [The declarative model — how Kubernetes thinks](#the-declarative-model--how-kubernetes-thinks)
+- [The control plane — what's running behind the scenes](#the-control-plane--whats-running-behind-the-scenes)
 - [Namespaces — organizing your cluster](#namespaces--organizing-your-cluster)
 - [Labels and selectors — finding things](#labels-and-selectors--finding-things)
+- [Workload controllers — managing Pods at scale](#workload-controllers--managing-pods-at-scale)
 - [Services — how apps talk to each other](#services--how-apps-talk-to-each-other)
+- [Ingress — routing external traffic](#ingress--routing-external-traffic)
 - [ConfigMaps — app settings without rebuilding](#configmaps--app-settings-without-rebuilding)
+- [Secrets — sensitive configuration](#secrets--sensitive-configuration)
 - [Persistent Volumes — giving Pods lasting storage](#persistent-volumes--giving-pods-lasting-storage)
 - [Health probes — knowing when a Pod is ready](#health-probes--knowing-when-a-pod-is-ready)
 - [Resource requests and limits](#resource-requests-and-limits)
 - [Node scheduling — controlling where Pods run](#node-scheduling--controlling-where-pods-run)
 - [CRDs and the Operator pattern](#crds-and-the-operator-pattern)
+- [RBAC — controlling who can do what](#rbac--controlling-who-can-do-what)
 
 ---
 
@@ -30,6 +36,86 @@ A Pod is the smallest unit Kubernetes manages. Think of it as a wrapper around o
 The key thing to know about Pods: **they are temporary**. If a Pod crashes, Kubernetes replaces it with a new one — but the new Pod gets a different IP address and a different name. This is intentional. Kubernetes is designed around the idea that individual containers come and go, and the system keeps things running regardless.
 
 This "temporary" nature is what motivates everything else on this page.
+
+---
+
+## The declarative model — how Kubernetes thinks
+
+The single biggest mental shift when learning Kubernetes is understanding that you never tell it *how* to do something — you tell it *what you want*, and it figures out the steps.
+
+This is called the **declarative model**:
+
+1. You write a YAML file describing the desired state ("I want 3 replicas of this web app running")
+2. You apply it with `kubectl apply`
+3. Kubernetes reads it, compares it against what is currently running, and takes action to close the gap
+
+This happens continuously. A loop called the **reconciliation loop** runs constantly inside Kubernetes: observe current state → compare to desired state → take action if they differ.
+
+**This is why things happen automatically.** It is not magic — it is just a loop running in the background.
+
+- A crashed Pod gets replaced — Kubernetes noticed current state (2 replicas) did not match desired state (3 replicas) and created a new one
+- You can re-apply the same manifest safely — if nothing changed, nothing happens
+- GitOps works — you push desired state to Git, and a controller applies it to the cluster
+
+### Imperative vs declarative
+
+| Approach | How you think | Example |
+|---|---|---|
+| Imperative | "Start this container on node 3" | `docker run ...` |
+| Declarative | "I want 3 copies of this app running" | `kubectl apply -f deployment.yaml` |
+
+Kubernetes supports both styles, but the declarative approach — YAML files committed to Git — is how real clusters are managed. It is self-documenting, auditable, and repeatable.
+
+### Upstream references
+
+- [Declarative management](https://kubernetes.io/docs/tasks/manage-kubernetes-objects/declarative-config/)
+- [Controllers](https://kubernetes.io/docs/concepts/architecture/controller/)
+
+---
+
+## The control plane — what's running behind the scenes
+
+When you run `kubectl apply`, something has to receive that request, decide what to do, and make it happen. That "something" is the **control plane** — the set of components that manage the cluster.
+
+In a K3s setup, all control plane components run on the **server node**. Worker nodes (agents) just run your workload Pods.
+
+### The four key components
+
+**API server** (`kube-apiserver`)
+
+Every interaction with Kubernetes goes through the API server — your `kubectl` commands, Headlamp, Helm, and controllers all talk to it. Think of it as the front desk: nothing happens without checking in here first.
+
+**etcd**
+
+The database where Kubernetes stores all cluster state: what Pods exist, what their desired state is, what Secrets contain, what nodes are registered. This is what you are backing up when you back up the cluster. If etcd is lost, the cluster's memory is gone.
+
+**Scheduler** (`kube-scheduler`)
+
+When a new Pod needs to run, the scheduler decides which node it should land on — based on available resources, taints, affinity rules, and other constraints. It picks the destination but does not start the Pod.
+
+**Controller manager** (`kube-controller-manager`)
+
+Runs many control loops in a single process. The Deployment controller makes sure the right number of Pods are running. The Node controller watches for nodes going offline. Each controller handles one concern and follows the same "observe → compare → act" pattern.
+
+### What happens when you run `kubectl apply`
+
+```
+kubectl apply → API server → etcd (stores desired state)
+                           ↓
+               Controller manager (notices change, decides to create Pods)
+                           ↓
+               Scheduler (picks a node for each Pod)
+                           ↓
+               kubelet on node (pulls the image, starts the container)
+```
+
+> [!NOTE]
+> K3s combines all of these into a single binary on the server node. This is what makes it lightweight compared to full Kubernetes distributions where each component runs separately.
+
+### Upstream references
+
+- [Kubernetes components](https://kubernetes.io/docs/concepts/overview/components/)
+- [K3s architecture](https://docs.k3s.io/architecture)
 
 ---
 
@@ -173,6 +259,66 @@ kubectl get pods --show-labels
 
 ---
 
+## Workload controllers — managing Pods at scale
+
+In Kubernetes you rarely create Pods directly. Instead, you create a **workload controller** — an object that creates and manages Pods for you, replacing them if they crash and maintaining the desired count.
+
+### The main controllers
+
+| Controller | Use it when | Key characteristic |
+|---|---|---|
+| `Deployment` | Your app is stateless and any replica can replace any other | Rolling updates, easy scaling |
+| `StatefulSet` | Each replica needs a stable name, ordered startup, or its own volume | Pods named `db-0`, `db-1`, `db-2` |
+| `DaemonSet` | You need exactly one Pod running on every matching node | Log agents, monitoring exporters |
+| `Job` | A task should run once to completion | Database migrations, backfill scripts |
+| `CronJob` | The same task should run on a schedule | Backups, cleanup tasks |
+
+### Deployment — the right default for most apps
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app
+spec:
+  replicas: 3            # Keep 3 Pods running at all times
+  selector:
+    matchLabels:
+      app: web-app
+  template:              # Pod template — what each Pod looks like
+    metadata:
+      labels:
+        app: web-app
+    spec:
+      containers:
+        - name: web
+          image: my-app:1.0.0
+```
+
+When you apply this, the Deployment controller creates the 3 Pods. If one crashes, the controller notices and creates a replacement. When you update the image tag, it performs a rolling update — replacing Pods one at a time so the app stays available.
+
+### StatefulSet — when identity matters
+
+```
+web-app-7d4f9b-xkp2m  ← Deployment Pod name (random, changes on restart)
+postgres-0             ← StatefulSet Pod name (stable, always postgres-0)
+```
+
+Because StatefulSet Pod names are stable, you can address `postgres-0.postgres-svc` directly from other Pods. This is how database replicas know which one is the primary, and why `StatefulSet` is always paired with a headless `Service`.
+
+> [!TIP]
+> If you are unsure which controller to use, start with a `Deployment`. Only switch to `StatefulSet` if you actually need stable identities or per-Pod volumes.
+
+See [`WORKLOADS.md`](WORKLOADS.md) for detailed examples of all five controller types, including PodDisruptionBudget, init containers, and HorizontalPodAutoscaler.
+
+### Upstream references
+
+- [Workloads](https://kubernetes.io/docs/concepts/workloads/)
+- [Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
+- [StatefulSet](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/)
+
+---
+
 ## Services — how apps talk to each other
 
 ### The problem
@@ -234,6 +380,85 @@ If a Service exists but traffic is not reaching your app, check the `Endpoints` 
 
 - [Services overview](https://kubernetes.io/docs/concepts/services-networking/service/)
 - [Connecting applications with Services](https://kubernetes.io/docs/tutorials/services/connect-applications-service/)
+
+---
+
+## Ingress — routing external traffic
+
+### The problem
+
+Services give Pods stable internal addresses, but by default a `ClusterIP` Service is only reachable inside the cluster. How does traffic from a browser visiting `https://myapp.example.com` get in?
+
+You could use `LoadBalancer` Services, but each one gets its own external IP. Ten apps would mean ten external IPs and ten separate HTTPS certificates — expensive and complicated.
+
+### The solution: Ingress + Ingress Controller
+
+An **Ingress** is a rule that says: "HTTP traffic arriving for `myapp.example.com` at path `/` should go to Service `my-app-svc` on port 8080."
+
+An **Ingress Controller** is the program that reads those rules and actually does the routing. It runs as a Pod inside the cluster and handles all incoming HTTP/HTTPS traffic through a single external IP. K3s ships with **Traefik** as the default Ingress Controller.
+
+```
+Internet
+    │
+    ▼
+Traefik (one external IP, ports 80 and 443)
+    │
+    ├── host: grafana.example.com  →  Service: monitoring-stack-grafana
+    ├── host: registry.example.com →  Service: private-registry
+    └── host: immich.example.com   →  Service: immich-server
+```
+
+A basic Ingress manifest:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-app-ingress
+  namespace: my-app
+spec:
+  ingressClassName: traefik        # Which Ingress Controller handles this rule
+  rules:
+    - host: myapp.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: my-app-svc  # The ClusterIP Service to route to
+                port:
+                  number: 8080
+  tls:
+    - hosts:
+        - myapp.example.com
+      secretName: myapp-tls        # cert-manager writes the certificate here
+```
+
+### How HTTPS fits in
+
+cert-manager watches for Ingress objects with TLS configuration, requests a certificate from Let's Encrypt, and stores it in the Secret named under `spec.tls[].secretName`. Traefik reads that Secret and terminates TLS — your app sees plain HTTP inside the cluster.
+
+> [!TIP]
+> The recommended pattern for HTTP apps in this guide: `ClusterIP` Service + Ingress rule + cert-manager certificate. Only use `LoadBalancer` for non-HTTP protocols like database connections or game servers.
+
+### Useful commands
+
+```bash
+# List all Ingress rules in a namespace
+kubectl get ingress -n <namespace>
+
+# See which Service an Ingress routes to
+kubectl describe ingress <name> -n <namespace>
+
+# Check available IngressClasses (which controllers are installed)
+kubectl get ingressclass
+```
+
+### Upstream references
+
+- [Ingress](https://kubernetes.io/docs/concepts/services-networking/ingress/)
+- [Ingress controllers](https://kubernetes.io/docs/concepts/services-networking/ingress-controllers/)
 
 ---
 
@@ -340,6 +565,68 @@ kubectl edit configmap my-config
 
 - [ConfigMaps](https://kubernetes.io/docs/concepts/configuration/configmap/)
 - [Configure a Pod to use a ConfigMap](https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/)
+
+---
+
+## Secrets — sensitive configuration
+
+A **Secret** is like a ConfigMap, but for sensitive data: passwords, API keys, tokens, TLS certificates. The API and access controls treat them differently — Secrets can be encrypted at rest, and RBAC rules commonly restrict who can read them even in namespaces where the reader can see everything else.
+
+> [!WARNING]
+> By default, Kubernetes stores Secrets as base64-encoded strings, not encrypted. Base64 is encoding, not encryption — anyone who can read the etcd database can decode them. To actually encrypt Secrets at rest, you need to enable encryption in the API server configuration, or use a managed cloud cluster that handles this automatically.
+
+### What a Secret looks like
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+  namespace: my-app
+type: Opaque
+data:
+  username: bXl1c2Vy          # echo -n "myuser" | base64
+  password: c3VwZXJzZWNyZXQ=  # echo -n "supersecret" | base64
+```
+
+You use Secrets the same way you use ConfigMaps — as environment variables or mounted files:
+
+```yaml
+# As environment variables
+envFrom:
+  - secretRef:
+      name: db-credentials
+
+# As a mounted file
+volumes:
+  - name: db-creds
+    secret:
+      secretName: db-credentials
+```
+
+### Secret types
+
+| Type | Use |
+|---|---|
+| `Opaque` | Generic key-value pairs — the default |
+| `kubernetes.io/tls` | TLS certificates (cert-manager creates these automatically) |
+| `kubernetes.io/dockerconfigjson` | Registry credentials for image pulls |
+
+### Keeping Secrets out of git
+
+The biggest practical challenge is that you need the values somewhere, but you cannot commit plaintext credentials to a git repo. Common approaches:
+
+- Create them manually with `kubectl create secret generic ...` and document what fields to create (not the values)
+- Use `--set-file` with Helm to pass secret files at install time without embedding them in YAML
+- Use SOPS or Sealed Secrets to commit encrypted secrets to git
+- Use External Secrets Operator to pull values from a vault at runtime
+
+See [`SECRETS.md`](SECRETS.md) for a detailed walkthrough of each approach.
+
+### Upstream references
+
+- [Secrets](https://kubernetes.io/docs/concepts/configuration/secret/)
+- [Secret types](https://kubernetes.io/docs/concepts/configuration/secret/#secret-types)
 
 ---
 
@@ -835,3 +1122,98 @@ The Operator pattern works especially well for stateful applications with comple
 - [Custom Resources](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/)
 - [Operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/)
 - [cert-manager concepts](https://cert-manager.io/docs/concepts/)
+
+---
+
+## RBAC — controlling who can do what
+
+By default, the service account a Pod runs as has very limited permissions. If a workload needs to call the Kubernetes API — to list Pods, read Secrets, or update a ConfigMap — you have to explicitly grant it permission. This is done with **Role-Based Access Control (RBAC)**.
+
+The core idea is a three-part sentence: **"Subject can perform Verb on Resource in Namespace."**
+
+- **Subject**: who is asking (a `ServiceAccount`, a user, or a group)
+- **Verb**: what action (`get`, `list`, `watch`, `create`, `update`, `patch`, `delete`)
+- **Resource**: what object type (`pods`, `secrets`, `configmaps`, `deployments`, etc.)
+
+### The four RBAC objects
+
+| Object | Scope | What it does |
+|---|---|---|
+| `Role` | Namespace | Defines a set of permissions within one namespace |
+| `ClusterRole` | Cluster-wide | Defines permissions across all namespaces, or for cluster-scoped objects like Nodes |
+| `RoleBinding` | Namespace | Grants a Role to a subject in a specific namespace |
+| `ClusterRoleBinding` | Cluster-wide | Grants a ClusterRole to a subject across the entire cluster |
+
+### A minimal example
+
+A background job that only needs to read ConfigMaps in its own namespace:
+
+```yaml
+# 1. A dedicated identity for the workload
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: config-reader
+  namespace: my-app
+---
+# 2. The permissions (what verbs are allowed on which resources)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: configmap-reader
+  namespace: my-app
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+---
+# 3. Link the identity to the permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: read-configmaps
+  namespace: my-app
+subjects:
+  - kind: ServiceAccount
+    name: config-reader
+    namespace: my-app
+roleRef:
+  kind: Role
+  name: configmap-reader
+  apiGroup: rbac.authorization.k8s.io
+```
+
+Then in the Deployment, reference the ServiceAccount:
+
+```yaml
+spec:
+  serviceAccountName: config-reader
+```
+
+### Important defaults to know
+
+- Every Pod uses the `default` ServiceAccount in its namespace unless you specify one. The `default` ServiceAccount has no extra permissions.
+- Set `automountServiceAccountToken: false` on Pods that do not call the Kubernetes API — this removes the credential from the Pod entirely.
+- Avoid `cluster-admin` for regular workloads. It grants unrestricted access to the entire cluster.
+
+> [!NOTE]
+> Most apps you deploy do not need any Kubernetes API access at all. Only components like Operators, GitOps controllers, monitoring agents, and ARC runners need RBAC grants — because they deliberately manage or read cluster state.
+
+### Useful commands
+
+```bash
+# Check what permissions a service account has
+kubectl auth can-i --list --as=system:serviceaccount:my-app:config-reader -n my-app
+
+# See all RoleBindings in a namespace
+kubectl get rolebindings -n my-app
+
+# See all ClusterRoleBindings
+kubectl get clusterrolebindings
+```
+
+### Upstream references
+
+- [RBAC authorization](https://kubernetes.io/docs/reference/access-authn-authz/rbac/)
+- [RBAC good practices](https://kubernetes.io/docs/concepts/security/rbac-good-practices/)
+- [Service Accounts](https://kubernetes.io/docs/concepts/security/service-accounts/)
