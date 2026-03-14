@@ -14,11 +14,16 @@ This repo is a hands-on study guide. You will learn Kubernetes by building a sma
 
 - [Introduction](#introduction)
 - [Best practices](#best-practices)
+
+**Companion guides**
 - [Concepts guide](CONCEPTS.md)
 - [Secrets guide](SECRETS.md)
 - [Workloads guide](WORKLOADS.md)
 - [Security guide](SECURITY.md)
+- [Operations guide](OPERATIONS.md)
 - [Troubleshooting guide](TROUBLESHOOTING.md)
+
+**Infrastructure**
 - [Install k3s](#install-k3s)
 - [Install Headlamp](#install-headlamp)
 - [Install the NFS CSI driver](#install-the-nfs-csi-driver)
@@ -29,16 +34,16 @@ This repo is a hands-on study guide. You will learn Kubernetes by building a sma
 - [Set up cert-manager for the Docker Registry certificate](#set-up-cert-manager-for-the-docker-registry-certificate)
 - [Set up Docker Registry](#set-up-docker-registry)
 - [Set up PostgreSQL](#set-up-postgresql)
-- [Optional components](#optional-components)
-  - [OpenSearch](#opensearch)
-  - [Kaniko](#kaniko)
-  - [GitOps with Flux or ArgoCD](#gitops-with-flux-or-argocd)
-- [Cluster operations guide](OPERATIONS.md)
-- [After install](#after-install)
-  - [Immich](#immich)
-  - [Hoarder](#hoarder)
-  - [ruTorrent](#rutorrent)
-- [Legacy PV examples](#legacy-pv-examples)
+
+**Optional infrastructure**
+- [OpenSearch](#opensearch)
+- [Kaniko](#kaniko)
+- [GitOps with Flux or ArgoCD](#gitops-with-flux-or-argocd)
+
+**Example applications**
+- [Immich](#immich)
+- [Hoarder](#hoarder)
+- [ruTorrent](#rutorrent)
 
 ---
 
@@ -63,8 +68,13 @@ For focused side guides, see [`CONCEPTS.md`](CONCEPTS.md) (core concepts), [`SEC
 
 If you are new to Kubernetes, read [`CONCEPTS.md`](CONCEPTS.md) before following the installation steps. It covers the foundational ideas that come up throughout this guide — with plain-language explanations and real-world analogies:
 
+- **Namespaces** — partitioning a cluster to keep applications and teams isolated
+- **Labels and selectors** — how Services find Pods and how objects relate to each other
 - **Services** — why Pod IPs are unreliable and how Services provide a stable address
 - **ConfigMaps** — storing app configuration outside the container image
+- **Persistent Volumes** — giving Pods storage that survives restarts
+- **Health probes** — readiness, liveness, and startup probes explained
+- **Resource requests and limits** — CPU and memory budgets for containers
 - **Node scheduling** — taints, tolerations, and affinity rules for controlling where Pods run
 - **CRDs and Operators** — how tools like cert-manager and OpenSearch extend Kubernetes with new object types
 
@@ -808,7 +818,7 @@ Keep `postgres/pg-service.yaml` for in-cluster access. Add `postgres/pg-loadbala
 
 ---
 
-## Optional components
+## Optional infrastructure
 
 These tools extend the cluster with logging, search, and build capabilities. They are not required for basic cluster operation but are commonly used alongside it.
 
@@ -957,7 +967,7 @@ See [`OPERATIONS.md`](OPERATIONS.md) for full runbooks on:
 
 ---
 
-## After install
+## Example applications
 
 These are end-user applications that run on top of the cluster. None of them are required for the cluster to function — they are example workloads you can deploy once the infrastructure above is in place.
 
@@ -1190,17 +1200,3 @@ kubectl apply -f rutorrent/main/
 
 - `rutorrent/rt-restart.yaml` — creates a `ServiceAccount`, `Role`, and `RoleBinding` in `rtorrent-x` that grant pod-delete permissions, useful for automated restart CronJobs
 
----
-
-## Legacy PV examples
-
-The `PV/` folder contains older standalone PersistentVolume and PersistentVolumeClaim examples from earlier versions of this repo. They use the `nfs-client` storage class (an older NFS provisioner that has been superseded by the NFS CSI driver). The per-service manifest folders like `postgres/` now contain their own, more up-to-date storage definitions.
-
-| File | Description |
-|---|---|
-| `PV/pv-nfs.yaml` | Generic NFS PV using `nfs-client` |
-| `PV/pv-claim.yaml` | Matching PVC (creates a claim named `postgres-pv-claim`) |
-| `PV/pv-local.yaml` | Local `hostPath` PV and PVC example |
-
-> [!NOTE]
-> These are kept for reference. For new deployments, prefer the NFS CSI-backed PVs in `postgres/pg-pv-nfs.yaml` or create similar manifests with `storageClassName: nfs-csi`.
