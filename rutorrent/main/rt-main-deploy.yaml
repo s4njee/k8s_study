@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rtorrent-main
+  namespace: rtorrent-x
+  labels:
+    app: rtorrent-main
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rtorrent-main
+  template:
+    metadata:
+      labels:
+        app: rtorrent-main
+    spec:
+      volumes:
+        - name: rt-pv-data
+          persistentVolumeClaim:
+            claimName: rt-data-pvc
+        - name: rt-pv-files
+          persistentVolumeClaim:
+            claimName: rt-files-pvc
+      containers:
+        - name: rtorrent-main
+          image: 192.168.50.57:5001/rtorrent-rutorrent # Sets Image
+          imagePullPolicy: "Always"
+          ports:
+            - containerPort: 8080 # Exposes container port
+          volumeMounts:
+            - mountPath: "/data"
+              name: rt-pv-data
+            - mountPath: "/downloads"
+              name: rt-pv-files
+          resources:
+            requests:
+              memory: "8000Mi"
+            limits:
+              memory: "16000Mi"
+          envFrom:
+            - configMapRef:
+                name: rt-main-config
+      imagePullSecrets:
+        - name: registrypullsecret

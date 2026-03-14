@@ -1,0 +1,32 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kaniko-build
+  namespace: kaniko
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: kaniko
+          image: ghcr.io/osscontainertools/kaniko:v1.27.0
+          args:
+            - --context=git://github.com/your-org/your-repo.git#refs/heads/main
+            - --dockerfile=Dockerfile
+            - --destination=registry.example.com/your-image:latest
+            - --cache=true
+            - --cache-repo=registry.example.com/your-image/cache
+            - --snapshot-mode=redo
+            - --use-new-run
+          volumeMounts:
+            - name: docker-config
+              mountPath: /kaniko/.docker
+              readOnly: true
+      volumes:
+        - name: docker-config
+          secret:
+            secretName: regcred
+            items:
+              - key: .dockerconfigjson
+                path: config.json

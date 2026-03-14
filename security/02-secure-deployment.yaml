@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: secure-app
+  namespace: security-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: secure-app
+  template:
+    metadata:
+      labels:
+        app: secure-app
+        access: allowed
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: busybox:1.28
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /www;
+              echo "secure app" > /www/index.html;
+              httpd -f -p 8080 -h /www
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: web-root
+              mountPath: /www
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: web-root
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: secure-app
+  namespace: security-demo
+spec:
+  selector:
+    app: secure-app
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

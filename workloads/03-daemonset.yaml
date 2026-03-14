@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-agent-demo
+  namespace: workloads-demo
+spec:
+  selector:
+    matchLabels:
+      app: node-agent-demo
+  template:
+    metadata:
+      labels:
+        app: node-agent-demo
+    spec:
+      automountServiceAccountToken: false
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: agent
+          image: busybox:1.28
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              while true; do
+                echo "daemonset running on ${NODE_NAME}";
+                sleep 300;
+              done
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi

@@ -1,0 +1,46 @@
+grafana:
+  enabled: true
+  persistence:
+    enabled: true
+    size: 10Gi
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hosts:
+      - grafana.example.com
+    path: /
+    pathType: Prefix
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 5Gi
+
+prometheus:
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hosts:
+      - prometheus.example.com
+    paths:
+      - /
+    pathType: Prefix
+  prometheusSpec:
+    retention: 15d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 20Gi

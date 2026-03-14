@@ -1,2 +1,5 @@
-admin
-bad46eaa065265110173f95a78066a65b3f2df84
+RNING: The RT_DHT_PORT variable is not set. Defaulting to a blank string.
+WARNING: The XMLRPC_PORT variable is not set. Defaulting to a blank string.
+WARNING: The RUTORRENT_PORT variable is not set. Defaulting to a blank string.
+WARNING: The WEBDAV_PORT variable is not set. Defaulting to a blank string.
+WARNING: The RT_INC_PORT variable is not set. Defaulting to a blank string.

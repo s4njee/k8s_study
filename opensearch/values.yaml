@@ -1,0 +1,45 @@
+apiGroup: opensearch.org
+
+cluster:
+  name: opensearch
+
+  general:
+    serviceName: opensearch
+    version: 2.8.0
+
+  dashboards:
+    enable: true
+    version: 2.8.0
+    replicas: 1
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "200m"
+      limits:
+        memory: "512Mi"
+        cpu: "200m"
+
+  nodePools:
+    - component: nodes
+      replicas: 1
+      diskSize: "30Gi"
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "500m"
+      roles:
+        - "master"
+        - "data"
+
+  ingress:
+    dashboards:
+      enabled: true
+      className: traefik
+      hosts:
+        - host: dashboards.example.com
+          paths:
+            - path: /
+              pathType: Prefix
