@@ -59,6 +59,8 @@ Use these defaults unless you have a strong reason not to:
 | `workloads/04-job.yaml` | Example one-time batch task |
 | `workloads/05-cronjob.yaml` | Example scheduled batch task with explicit time zone and concurrency policy |
 | `workloads/06-pdb.yaml` | Example `PodDisruptionBudget` protecting the web deployment |
+| *(inline example)* | `InitContainer` — ordered setup tasks that run before the main containers start |
+| *(inline example)* | `HorizontalPodAutoscaler` — automatic scaling based on CPU or memory |
 
 ## Recommended apply flow
 

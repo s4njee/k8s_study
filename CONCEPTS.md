@@ -24,6 +24,8 @@ The guidance below was checked against the official Kubernetes docs on **March 1
 - [Node scheduling — controlling where Pods run](#node-scheduling--controlling-where-pods-run)
 - [CRDs and the Operator pattern](#crds-and-the-operator-pattern)
 - [RBAC — controlling who can do what](#rbac--controlling-who-can-do-what)
+- [Annotations — attaching metadata for tools](#annotations--attaching-metadata-for-tools)
+- [Rolling updates and rollbacks](#rolling-updates-and-rollbacks)
 
 ---
 
@@ -83,7 +85,7 @@ In a K3s setup, all control plane components run on the **server node**. Worker 
 
 **API server** (`kube-apiserver`)
 
-Every interaction with Kubernetes goes through the API server — your `kubectl` commands, Headlamp, Helm, and controllers all talk to it. Think of it as the front desk: nothing happens without checking in here first.
+Every interaction with Kubernetes goes through the API server — your `kubectl` commands, Headlamp (a web-based dashboard), Helm, and controllers all talk to it. Think of it as the front desk: nothing happens without checking in here first.
 
 **etcd**
 
@@ -353,7 +355,7 @@ There are four types of Services, and choosing the right one is important:
 | `ExternalName` | Apps inside the cluster | A phone book entry that just redirects you somewhere else | Aliasing an outside service as if it lived inside the cluster |
 
 > [!TIP]
-> If you are exposing a web app, use `ClusterIP` + an **Ingress** rule (see the Traefik section in the main README) instead of `LoadBalancer`. Ingress handles HTTPS, routing, and certificates in one place.
+> If you are exposing a web app, use `ClusterIP` + an **Ingress** rule (covered in the [Ingress section](#ingress--routing-external-traffic) below) instead of `LoadBalancer`. Ingress handles HTTPS, routing, and certificates in one place.
 
 ### Headless Services
 
@@ -1217,3 +1219,163 @@ kubectl get clusterrolebindings
 - [RBAC authorization](https://kubernetes.io/docs/reference/access-authn-authz/rbac/)
 - [RBAC good practices](https://kubernetes.io/docs/concepts/security/rbac-good-practices/)
 - [Service Accounts](https://kubernetes.io/docs/concepts/security/service-accounts/)
+
+---
+
+## Annotations — attaching metadata for tools
+
+### The problem
+
+Labels are for identifying and selecting objects — Kubernetes uses them to wire things together (Services find Pods by label, Deployments track their Pods by label). But sometimes you need to attach configuration or instructions to an object that Kubernetes itself does not need to understand. A third-party tool does.
+
+### The solution: Annotations
+
+An **annotation** is a key-value pair attached to an object, just like a label — but with one important difference: **annotations are not used for selection**. They are read by tools, controllers, and operators to configure behavior.
+
+```yaml
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+```
+
+You will encounter annotations constantly when working with tools like:
+
+| Tool | What the annotation does |
+|---|---|
+| cert-manager | Which issuer to use for a TLS certificate |
+| Traefik / nginx ingress | Rewrite rules, auth middleware, rate limiting |
+| Prometheus | Whether to scrape this Pod for metrics, and on which port |
+| Velero | Which namespaces to include/exclude in backups |
+| ArgoCD / Flux | Sync behavior and policies |
+
+### Labels vs annotations
+
+| | Labels | Annotations |
+|---|---|---|
+| Used for selection? | Yes | No |
+| Kubernetes uses them internally? | Yes | No |
+| Can hold complex values? | No (short strings only) | Yes (URLs, JSON snippets, long strings) |
+| Read by | Kubernetes and tools | Tools only |
+
+### What annotations look like in practice
+
+A common pattern: you create an Ingress and annotate it to tell the ingress controller how to handle the request, and cert-manager which certificate to provision:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-app
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+spec:
+  tls:
+    - hosts: [myapp.example.com]
+      secretName: my-app-tls
+  rules:
+    - host: myapp.example.com
+      # ... remaining rules
+```
+
+The Kubernetes API does not understand `cert-manager.io/cluster-issuer` — it just stores it. The cert-manager Operator watches for Ingress objects with that annotation and handles the certificate provisioning automatically.
+
+> [!TIP]
+> When an application is not behaving as expected, check its annotations first. Many tools are configured entirely through them, and a typo in an annotation key is a common source of silent misconfiguration.
+
+### Upstream references
+
+- [Annotations](https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/)
+
+---
+
+## Rolling updates and rollbacks
+
+### The problem
+
+You have a web app running in production with three replicas. You need to deploy a new version. How do you update all three Pods without causing downtime?
+
+### The solution: Rolling updates
+
+When you update a Deployment (change the image tag, update an environment variable, adjust resource limits), Kubernetes does not delete all Pods and recreate them at once. By default it performs a **rolling update** — replacing Pods a few at a time while keeping the rest running.
+
+```
+Before:  [v1] [v1] [v1]
+
+Step 1:  [v1] [v1] [v2]   ← one new Pod starts, traffic still flows through v1s
+
+Step 2:  [v1] [v2] [v2]   ← another replaced once v2 is ready
+
+Step 3:  [v2] [v2] [v2]   ← done
+```
+
+The update only proceeds once the new Pod passes its readiness probe. If the new Pod never becomes ready, the rollout stalls — and your old Pods keep running. This is a built-in safety net.
+
+### Controlling the rollout
+
+Two settings in the Deployment spec control how aggressive the rollout is:
+
+```yaml
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1   # how many Pods can be down at once during the update
+      maxSurge: 1         # how many extra Pods can exist above the desired count
+```
+
+- `maxUnavailable: 1` means at most one Pod is replaced at a time — the others keep serving traffic
+- `maxSurge: 1` allows one extra Pod to be created above the desired count, so a new one can start before an old one is removed
+
+Both accept absolute numbers or percentages (`25%`).
+
+### Watching a rollout
+
+```bash
+# Watch the rollout in real time
+kubectl rollout status deployment/my-app
+
+# See the rollout history
+kubectl rollout history deployment/my-app
+```
+
+### Rolling back
+
+If a new version has a bug — application errors, failing health checks, high latency — you can instantly roll back to the previous version:
+
+```bash
+# Roll back to the previous version
+kubectl rollout undo deployment/my-app
+
+# Roll back to a specific revision from the history
+kubectl rollout undo deployment/my-app --to-revision=3
+```
+
+Kubernetes keeps a history of past ReplicaSets (controlled by `spec.revisionHistoryLimit`, default 10). Each rollback is itself a declarative operation — it sets the desired state to the previous spec.
+
+> [!WARNING]
+> A rollback reverts the Pod template (image, env vars, resource limits) but does **not** roll back anything outside Kubernetes — database migrations, feature flags in external systems, or changes to persistent storage. Always account for these when planning a rollback.
+
+### Pausing and resuming rollouts
+
+If you need to make several changes without triggering a rollout for each one:
+
+```bash
+# Pause the Deployment — changes will be staged but not applied
+kubectl rollout pause deployment/my-app
+
+# Make your changes
+kubectl set image deployment/my-app app=my-image:v3
+kubectl set env deployment/my-app LOG_LEVEL=debug
+
+# Resume — a single rollout applies all staged changes
+kubectl rollout resume deployment/my-app
+```
+
+### Upstream references
+
+- [Deployments — rolling update strategy](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment)
+- [kubectl rollout](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_rollout/)
