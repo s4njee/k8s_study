@@ -9,8 +9,13 @@ The guidance below was checked against the official Kubernetes docs on **March 1
 ## Table of contents
 
 - [What is a Pod?](#what-is-a-pod)
+- [Namespaces — organizing your cluster](#namespaces--organizing-your-cluster)
+- [Labels and selectors — finding things](#labels-and-selectors--finding-things)
 - [Services — how apps talk to each other](#services--how-apps-talk-to-each-other)
 - [ConfigMaps — app settings without rebuilding](#configmaps--app-settings-without-rebuilding)
+- [Persistent Volumes — giving Pods lasting storage](#persistent-volumes--giving-pods-lasting-storage)
+- [Health probes — knowing when a Pod is ready](#health-probes--knowing-when-a-pod-is-ready)
+- [Resource requests and limits](#resource-requests-and-limits)
 - [Node scheduling — controlling where Pods run](#node-scheduling--controlling-where-pods-run)
 - [CRDs and the Operator pattern](#crds-and-the-operator-pattern)
 
@@ -25,6 +30,146 @@ A Pod is the smallest unit Kubernetes manages. Think of it as a wrapper around o
 The key thing to know about Pods: **they are temporary**. If a Pod crashes, Kubernetes replaces it with a new one — but the new Pod gets a different IP address and a different name. This is intentional. Kubernetes is designed around the idea that individual containers come and go, and the system keeps things running regardless.
 
 This "temporary" nature is what motivates everything else on this page.
+
+---
+
+## Namespaces — organizing your cluster
+
+### The problem
+
+As you add more applications to a cluster, everything starts to pile up in one place. How do you keep a team's test workloads from accidentally affecting production? How do you make sure one app cannot consume all of the cluster's memory and starve out everything else?
+
+### The solution: Namespaces
+
+A **Namespace** is a virtual partition inside a Kubernetes cluster. Think of it like a folder on your computer — it groups related objects together and keeps them separate from objects in other folders.
+
+By default, everything lands in the `default` namespace. In practice, it is much cleaner to give each application or team its own namespace:
+
+```
+cluster
+├── namespace: production
+│   ├── Deployment: web-app
+│   └── Service: web-app
+├── namespace: staging
+│   ├── Deployment: web-app   ← same names, totally separate
+│   └── Service: web-app
+└── namespace: monitoring
+    └── Deployment: prometheus
+```
+
+Most Kubernetes objects are namespace-scoped: Pods, Deployments, Services, ConfigMaps, Secrets, and so on. A few are cluster-scoped and exist outside any namespace — Nodes and PersistentVolumes are examples.
+
+### What namespaces give you
+
+- **Isolation:** Objects in different namespaces do not interfere with each other by default, even if they share the same name.
+- **Access control:** You can grant a team permission to manage their own namespace without giving them cluster-wide access.
+- **Resource limits:** A `ResourceQuota` applied to a namespace caps how much CPU, memory, and how many objects that namespace can use.
+- **Network policies:** You can write rules that allow or deny traffic between namespaces.
+
+### Useful commands
+
+```bash
+# List all namespaces
+kubectl get namespaces
+
+# Work in a specific namespace
+kubectl get pods -n my-namespace
+
+# Set a default namespace for your session so you don't need -n every time
+kubectl config set-context --current --namespace=my-namespace
+```
+
+> [!TIP]
+> Any time you create a new application or set up a new team's environment, create a dedicated namespace for it first. It is the single easiest thing you can do to keep a cluster organized.
+
+### Upstream references
+
+- [Namespaces](https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/)
+
+---
+
+## Labels and selectors — finding things
+
+### The problem
+
+Kubernetes manages many objects at once. How does a Service know which Pods it should route traffic to? How does a Deployment know which Pods it owns? How do you quickly find all objects related to a specific application?
+
+### The solution: Labels and selectors
+
+A **label** is a simple key-value pair you attach to any Kubernetes object. Labels are just metadata — Kubernetes does not interpret them. You decide what they mean.
+
+```yaml
+metadata:
+  labels:
+    app: web-frontend
+    environment: production
+    version: "2.1.0"
+```
+
+A **selector** is how one object says "find me everything with these labels." Services use selectors to decide which Pods to route traffic to:
+
+```yaml
+# In a Service
+selector:
+  app: web-frontend     # ← route traffic to Pods with this label
+```
+
+```yaml
+# In a Deployment
+selector:
+  matchLabels:
+    app: web-frontend   # ← this Deployment manages Pods with this label
+```
+
+This is the glue that holds Kubernetes together. When you deploy a new version and old Pods are being replaced, the Service keeps routing to whichever Pods are currently running and healthy — because it selects by label, not by Pod name.
+
+### A common labeling convention
+
+There are no required labels, but this pattern is widely used:
+
+| Label | Example value | What it represents |
+|---|---|---|
+| `app` | `web-frontend` | The application name |
+| `component` | `database` | The role within the app |
+| `environment` | `production` | Which environment this runs in |
+| `version` | `2.1.0` | The version of the app |
+
+You do not need all of these. Even just `app` is enough to make selectors work.
+
+### Annotations — labels for humans and tools
+
+**Annotations** are similar to labels but are for information that is not used for selecting objects. Tools (like cert-manager or monitoring agents) use annotations to attach metadata they need:
+
+```yaml
+metadata:
+  annotations:
+    prometheus.io/scrape: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+```
+
+The distinction: labels are for selectors (used by Kubernetes to match objects), annotations are for attaching arbitrary information (used by tools and humans).
+
+### Useful commands
+
+```bash
+# Add a label to a running Pod
+kubectl label pod my-pod environment=production
+
+# Filter output by label
+kubectl get pods -l app=web-frontend
+kubectl get pods -l environment=production,app=web-frontend
+
+# See labels on all objects in a namespace
+kubectl get pods --show-labels
+```
+
+> [!NOTE]
+> If a Service is not routing traffic to your Pods, check that the labels on your Pods exactly match the selector in your Service. Even a small typo — or a missing label — will result in an empty Endpoints list and no traffic.
+
+### Upstream references
+
+- [Labels and selectors](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/)
+- [Annotations](https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/)
 
 ---
 
@@ -195,6 +340,281 @@ kubectl edit configmap my-config
 
 - [ConfigMaps](https://kubernetes.io/docs/concepts/configuration/configmap/)
 - [Configure a Pod to use a ConfigMap](https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/)
+
+---
+
+## Persistent Volumes — giving Pods lasting storage
+
+### The problem
+
+Pods are temporary. When a Pod restarts or gets replaced, everything stored inside the container disappears. This is fine for stateless apps, but it is a problem for anything that needs to keep data — a database, an upload directory, a cache.
+
+You need somewhere to store data that survives Pod restarts.
+
+### The solution: PersistentVolumes and PersistentVolumeClaims
+
+Kubernetes splits storage into two separate concepts:
+
+- A **PersistentVolume (PV)** is an actual piece of storage that exists in your infrastructure — a directory on a node, an NFS share, a cloud disk. It describes how much space is available and how it can be used.
+- A **PersistentVolumeClaim (PVC)** is a request from a Pod saying "give me some storage with these requirements." It does not know or care which physical storage it gets — it just asks for what it needs.
+
+Think of it like a hotel room analogy. A PV is an actual room the hotel has available. A PVC is a guest's reservation saying "I need a room with a king bed and Wi-Fi." The hotel matches the request to an available room without the guest needing to know the room number in advance.
+
+```
+Pod → PersistentVolumeClaim → PersistentVolume → actual storage
+         "I need 10 GB"          "I have 20 GB"    (NFS, local disk, cloud)
+```
+
+### What a PVC looks like
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: database-storage
+  namespace: my-app
+spec:
+  accessModes:
+    - ReadWriteOnce    # Only one node can write at a time
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: local-path   # Which type of storage to use
+```
+
+Then in a Deployment or StatefulSet, you mount the PVC as a volume:
+
+```yaml
+spec:
+  volumes:
+    - name: db-data
+      persistentVolumeClaim:
+        claimName: database-storage   # ← reference the PVC by name
+  containers:
+    - name: database
+      volumeMounts:
+        - name: db-data
+          mountPath: /var/lib/data    # ← where it appears inside the container
+```
+
+The data written to `/var/lib/data` inside the container now persists across Pod restarts.
+
+### Access modes
+
+| Mode | Meaning | Typical use |
+|---|---|---|
+| `ReadWriteOnce` | One node can read and write | Databases, single-instance apps |
+| `ReadOnlyMany` | Many nodes can read, no writing | Shared config files, static assets |
+| `ReadWriteMany` | Many nodes can read and write | Shared uploads, NFS-backed storage |
+
+> [!NOTE]
+> Not all storage types support all access modes. Local disk storage only supports `ReadWriteOnce`. NFS and some cloud storage support `ReadWriteMany`. Check your storage provider's docs.
+
+### Storage classes
+
+A **StorageClass** defines how storage is provisioned. When you create a PVC and name a StorageClass, Kubernetes automatically creates the PV for you. K3s ships with `local-path` as the default StorageClass, which stores data in a directory on the node where the Pod runs.
+
+```bash
+# See what StorageClasses are available
+kubectl get storageclass
+
+# See all PVs in the cluster
+kubectl get pv
+
+# See all PVCs in a namespace
+kubectl get pvc -n my-namespace
+```
+
+> [!WARNING]
+> If you use `local-path` storage and the Pod moves to a different node (due to a node failure or reschedule), it cannot access the data from the original node. For anything important, use networked storage like NFS, or a cloud provider's storage class.
+
+### Upstream references
+
+- [Persistent Volumes](https://kubernetes.io/docs/concepts/storage/persistent-volumes/)
+- [StorageClasses](https://kubernetes.io/docs/concepts/storage/storage-classes/)
+
+---
+
+## Health probes — knowing when a Pod is ready
+
+### The problem
+
+A container can be running without actually being ready to serve traffic. Maybe the app is still loading configuration, waiting for a database connection, or warming up a cache. If Kubernetes sends requests to a Pod the moment it starts, users may see errors.
+
+Conversely, a container can get stuck in a broken state — a deadlock, a full queue, a corrupted internal state — without actually crashing. If Kubernetes does not know about this, it keeps sending traffic to a broken Pod.
+
+### The solution: Three types of probes
+
+Kubernetes supports three probes you can add to any container:
+
+| Probe | Question it asks | What Kubernetes does if it fails |
+|---|---|---|
+| **Readiness** | "Is this container ready to accept traffic?" | Removes the Pod from the Service's endpoint list — stops sending it traffic |
+| **Liveness** | "Is this container still working?" | Restarts the container |
+| **Startup** | "Has this container finished starting up?" | Delays readiness and liveness checks until startup succeeds |
+
+### Readiness probe — traffic control
+
+Use a readiness probe to tell Kubernetes when your app is actually ready to serve requests. Until the probe passes, the Pod will not receive any traffic from a Service, even if the container is running.
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 5    # Wait 5s before first check
+  periodSeconds: 10         # Check every 10s
+```
+
+This is the most important probe to add. Without it, rolling updates can briefly send traffic to a new Pod before it is ready.
+
+### Liveness probe — crash detection
+
+Use a liveness probe to detect when an app has gotten stuck in a broken state that it cannot recover from on its own. Kubernetes will restart the container.
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 30   # Give the app time to start before checking
+  periodSeconds: 30
+  failureThreshold: 3       # Restart after 3 consecutive failures
+```
+
+> [!WARNING]
+> Be careful with liveness probes. If you set one up incorrectly — for example, making it check something that legitimately takes time under load — Kubernetes will restart healthy Pods and make your outage worse. Only use a liveness probe when the container can genuinely get stuck and needs a restart to recover.
+
+### Startup probe — slow-starting apps
+
+Some apps (Java applications, large models, apps doing database migrations) take a long time to start. If you set `initialDelaySeconds` too short on a liveness probe, Kubernetes will restart the app before it finishes starting.
+
+A startup probe solves this cleanly: liveness and readiness probes are paused until the startup probe first succeeds.
+
+```yaml
+startupProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  failureThreshold: 30      # Allow up to 30 failures (5 minutes total at 10s intervals)
+  periodSeconds: 10
+```
+
+### Probe types
+
+Probes do not have to be HTTP calls. There are three ways to check:
+
+```yaml
+# HTTP GET — success if status code is 200–399
+httpGet:
+  path: /healthz
+  port: 8080
+
+# TCP socket — success if the port accepts a connection
+tcpSocket:
+  port: 5432
+
+# Exec — success if the command exits with code 0
+exec:
+  command: ["pg_isready", "-U", "postgres"]
+```
+
+### Useful commands
+
+```bash
+# See the probe status for a Pod
+kubectl describe pod <pod-name> -n <namespace>
+
+# Check why a Pod is not becoming ready
+kubectl get events -n <namespace> --sort-by='.lastTimestamp'
+```
+
+### Upstream references
+
+- [Configure liveness, readiness, and startup probes](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
+
+---
+
+## Resource requests and limits
+
+### The problem
+
+If you run many containers on the same machine without any constraints, one misbehaving container could consume all available CPU and memory, starving every other container on that node.
+
+You also need a way to tell Kubernetes how much resource a container needs, so it can decide which node to schedule it on.
+
+### The solution: Requests and limits
+
+Every container can (and should) declare two things for CPU and memory:
+
+- A **request** is the minimum the container needs. Kubernetes uses this to decide where to schedule the Pod — it will only place the Pod on a node that has enough free resources to meet the request.
+- A **limit** is the maximum the container is allowed to use. If the container tries to exceed this, Kubernetes throttles it (CPU) or kills it (memory).
+
+```yaml
+resources:
+  requests:
+    memory: "128Mi"   # Guarantee at least 128 MiB of memory
+    cpu: "100m"       # Guarantee at least 100 millicores (0.1 CPU)
+  limits:
+    memory: "256Mi"   # Never allow more than 256 MiB of memory
+    cpu: "500m"       # Never allow more than 500 millicores (0.5 CPU)
+```
+
+### CPU units
+
+CPU is measured in **millicores**. 1000m = 1 CPU core.
+
+- `100m` = 10% of one CPU core
+- `500m` = half a CPU core
+- `2000m` (or just `"2"`) = 2 CPU cores
+
+If a container hits its CPU limit, Kubernetes throttles it — it slows down but keeps running.
+
+### Memory units
+
+Memory uses standard binary units:
+- `Mi` = mebibytes (1 Mi = 1,048,576 bytes, roughly 1 MB)
+- `Gi` = gibibytes (roughly 1 GB)
+
+If a container hits its memory limit, Kubernetes kills it with an OOMKilled (Out of Memory Killed) error and restarts it. This is why requests and limits matter: an under-resourced container will keep restarting.
+
+### Requests vs limits: what happens at each
+
+| Situation | What Kubernetes does |
+|---|---|
+| Container uses less than its request | Normal — request is just a scheduling guarantee |
+| Container uses between request and limit | Allowed — extra resources are used when available |
+| Container hits CPU limit | Throttled — slows down, does not crash |
+| Container hits memory limit | Killed and restarted (OOMKilled) |
+| Node runs out of memory | Pods whose memory usage exceeds their request are evicted first |
+
+### Why requests matter for HPA
+
+The HorizontalPodAutoscaler (HPA) calculates CPU utilization as a percentage of the container's CPU **request**. If you do not set a request, the HPA cannot compute utilization and will show `<unknown>` instead of a percentage.
+
+> [!TIP]
+> As a starting point: set your request to the average resource usage you observe, and set your limit to 2–4x the request. Tune from there using real metrics. Setting limits too low causes unnecessary OOMKills; setting them too high wastes cluster capacity.
+
+### Useful commands
+
+```bash
+# See current resource usage per Pod
+kubectl top pods -n <namespace>
+
+# See current resource usage per node
+kubectl top nodes
+
+# Check resource requests and limits on a Deployment
+kubectl describe deployment <name> -n <namespace>
+```
+
+> [!NOTE]
+> `kubectl top` requires the Metrics Server to be running. K3s ships with it enabled by default.
+
+### Upstream references
+
+- [Resource management for Pods and containers](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/)
+- [Metrics Server](https://github.com/kubernetes-sigs/metrics-server)
 
 ---
 
