@@ -19,8 +19,8 @@ serviceAccount:
   annotations: {}
 
 image:
-  repository: registry
-  tag: 2.8.1
+  repository: distribution/registry
+  tag: 3.0.0
   pullPolicy: IfNotPresent
 # imagePullSecrets:
 # - name: docker
@@ -37,21 +37,19 @@ service:
   annotations: {}
   # foo.io/bar: "true"
 ingress:
-  enabled: false
+  enabled: true
   className: traefik
   path: /
   # Used to create an Ingress record.
   hosts:
-    - registry.s8njee.com
-  annotations: {}
-  kubernetes.io/ingress.class: traefik
-  kubernetes.io/tls-acme: "true"
+    - registry.example.com
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
   labels: {}
   tls:
-    # Secrets must be manually created in the namespace.
-    - secretName: s8njee-tls
+    - secretName: docker-registry-tls
       hosts:
-        - registry.s8njee.com
+        - registry.example.com
 resources:
   {}
   # We usually recommend not to specify default resources and to leave this as a conscious
@@ -66,15 +64,15 @@ resources:
   #  memory: 128Mi
 persistence:
   accessMode: "ReadWriteOnce"
-  enabled: false
-  size: 10Gi
+  enabled: true
+  size: 20Gi
   # storageClass: '-'
 
 # set the type of filesystem to use: filesystem, s3
 storage: filesystem
 
 # Set this to name of secret for tls certs
-#tlsSecretName: s8njee-tls
+tlsSecretName: docker-registry-tls
 secrets:
   haSharedSecret: ""
   htpasswd: ""

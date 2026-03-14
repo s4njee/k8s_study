@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rtorrent-main-lb
+  namespace: rtorrent-x
+spec:
+  selector:
+    app: rtorrent-main
+  ports:
+    - port: 6777
+      protocol: UDP
+      name: "dht"
+    - port: 50000
+      targetPort: 50000
+      protocol: TCP
+      name: "rt-inc"
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+      name: "rt-web"
+  type: LoadBalancer
+status:
+  loadBalancer:
+    ingress:
+      - ip: 192.168.50.57
